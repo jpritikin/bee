@@ -19,6 +19,8 @@ import (
 
 var _ storage.StateStorer = (*store)(nil)
 
+var CurrentSchema = "ubud"
+
 // Store uses LevelDB to store values.
 type store struct {
 	db     *leveldb.DB
