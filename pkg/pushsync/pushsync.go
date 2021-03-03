@@ -117,6 +117,9 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 		return swarm.ErrInvalidChunk
 	}
 
+	// TODO(esad): if the p's address is closer to the chunk than my address, then simply store it and return
+	// how can I retrieve my address here?
+
 	span, _, ctx := ps.tracer.StartSpanFromContext(ctx, "pushsync-handler", ps.logger, opentracing.Tag{Key: "address", Value: chunk.Address().String()})
 	defer span.Finish()
 
@@ -129,6 +132,14 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 			if err != nil {
 				return fmt.Errorf("chunk store: %w", err)
 			}
+
+			// TODO(esad): push the chunk to the second closest peer
+			// does ClosestPeer ignore myself?
+			pr, err := ps.peerSuggester.ClosestPeer(chunk.Address())
+			if err != nil {
+				return fmt.Errorf("second closest peer: %w", err)
+			}
+			go ps.pushToPeer(ctx, pr, chunk)
 
 			receipt := pb.Receipt{Address: chunk.Address().Bytes()}
 			if err := w.WriteMsg(&receipt); err != nil {
@@ -278,4 +289,25 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk) (rr *pb.R
 	}
 
 	return nil, topology.ErrNotFound
+}
+
+func (ps *PushSync) pushToPeer(ctx context.Context, peer swarm.Address, ch swarm.Chunk) (err error) {
+
+	streamer, err := ps.streamer.NewStream(ctx, peer, nil, protocolName, protocolVersion, streamName)
+	if err != nil {
+		return fmt.Errorf("new stream for peer %s: %w", peer.String(), err)
+	}
+
+	w := protobuf.NewWriter(streamer)
+	ctx, cancel := context.WithTimeout(ctx, timeToWaitForReceipt)
+	defer cancel()
+	if err := w.WriteMsgWithContext(ctx, &pb.Delivery{
+		Address: ch.Address().Bytes(),
+		Data:    ch.Data(),
+	}); err != nil {
+		_ = streamer.Reset()
+		return fmt.Errorf("chunk %s deliver to peer %s: %w", ch.Address().String(), peer.String(), err)
+	}
+
+	return nil
 }

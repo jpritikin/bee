@@ -90,14 +90,83 @@ func TestSendChunkAndReceiveReceipt(t *testing.T) {
 	}
 }
 
+func TestReplicateBeforeReceipt(t *testing.T) {
+
+	t.Skip()
+	// chunk data to upload
+	chunk := testingc.FixtureChunk("7000") // base 0111
+
+	// create a pivot node and a mocked closest node
+	pivotNode := swarm.MustParseHexAddress("0000000000000000000000000000000000000000000000000000000000000000")     // base is 0000
+	closestPeer := swarm.MustParseHexAddress("6000000000000000000000000000000000000000000000000000000000000000")   // binary 0110 -> po 1
+	secondClosest := swarm.MustParseHexAddress("4000000000000000000000000000000000000000000000000000000000000000") // binary 0100 -> po 1
+
+	// node that is second closest to chunk address
+	// will receieve chunk from closestPeer
+	psSecond_, storerSecond, _, _ := createPushSyncNode(t, secondClosest, nil, nil, mock.WithPeers(closestPeer))
+	defer storerSecond.Close()
+
+	secondRecorder := streamtest.New(streamtest.WithProtocols(psSecond_.Protocol()))
+	// peer is the node responding to the chunk receipt message
+	// mock should return ErrWantSelf since there's no one to forward to
+	psPeer, storerPeer, _, peerAccounting := createPushSyncNode(t, closestPeer, secondRecorder, nil, mock.WithClosestPeerErr(topology.ErrWantSelf), mock.WithPeers(secondClosest))
+	defer storerPeer.Close()
+
+	recorder := streamtest.New(streamtest.WithProtocols(psPeer.Protocol()))
+	// pivot node needs the streamer since the chunk is intercepted by
+	// the chunk worker, then gets sent by opening a new stream
+	psPivot, storerPivot, _, pivotAccounting := createPushSyncNode(t, pivotNode, recorder, nil, mock.WithClosestPeer(closestPeer))
+	defer storerPivot.Close()
+
+	// Trigger the sending of chunk to the closest node
+	receipt, err := psPivot.PushChunkToClosest(context.Background(), chunk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !chunk.Address().Equal(receipt.Address) {
+		t.Fatal("invalid receipt")
+	}
+
+	// this intercepts the outgoing delivery message from pivot node to storer node
+	waitOnRecordAndTest(t, closestPeer, recorder, chunk.Address(), chunk.Data())
+
+	// this intercepts the outgoing delivery message from storer node to second storer node
+	waitOnRecordAndTest(t, secondClosest, secondRecorder, chunk.Address(), chunk.Data())
+
+	// TODO(esad): MISSING CHECK HERE
+	// we must check that secondClosest does not push the chunk to any peer
+
+	// this intercepts the incoming receipt message
+	waitOnRecordAndTest(t, closestPeer, recorder, chunk.Address(), nil)
+
+	balance, err := pivotAccounting.Balance(closestPeer)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if balance.Int64() != -int64(fixedPrice) {
+		t.Fatalf("unexpected balance on pivot. want %d got %d", -int64(fixedPrice), balance)
+	}
+
+	balance, err = peerAccounting.Balance(closestPeer)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if balance.Int64() != int64(fixedPrice) {
+		t.Fatalf("unexpected balance on peer. want %d got %d", int64(fixedPrice), balance)
+	}
+}
+
 // PushChunkToClosest tests the sending of chunk to closest peer from the origination source perspective.
 // it also checks wether the tags are incremented properly if they are present
 func TestPushChunkToClosest(t *testing.T) {
 	// chunk data to upload
 	chunk := testingc.FixtureChunk("7000")
 	// create a pivot node and a mocked closest node
-	pivotNode := swarm.MustParseHexAddress("0000")   // base is 0000
-	closestPeer := swarm.MustParseHexAddress("6000") // binary 0110 -> po 1
+	pivotNode := swarm.MustParseHexAddress("0000000000000000000000000000000000000000000000000000000000000000")   // base is 0000
+	closestPeer := swarm.MustParseHexAddress("6000000000000000000000000000000000000000000000000000000000000000") // binary 0110 -> po 1
 	callbackC := make(chan struct{}, 1)
 	// peer is the node responding to the chunk receipt message
 	// mock should return ErrWantSelf since there's no one to forward to
@@ -181,10 +250,10 @@ func TestPushChunkToNextClosest(t *testing.T) {
 	chunk := testingc.FixtureChunk("7000")
 
 	// create a pivot node and a mocked closest node
-	pivotNode := swarm.MustParseHexAddress("0000") // base is 0000
+	pivotNode := swarm.MustParseHexAddress("0000000000000000000000000000000000000000000000000000000000000000") // base is 0000
 
-	peer1 := swarm.MustParseHexAddress("6000")
-	peer2 := swarm.MustParseHexAddress("5000")
+	peer1 := swarm.MustParseHexAddress("5000000000000000000000000000000000000000000000000000000000000000")
+	peer2 := swarm.MustParseHexAddress("6000000000000000000000000000000000000000000000000000000000000000")
 	peers := []swarm.Address{
 		peer1,
 		peer2,
