@@ -133,8 +133,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 				return fmt.Errorf("chunk store: %w", err)
 			}
 
-			// TODO(esad): push the chunk to the second closest peer
-			// does ClosestPeer ignore myself?
+			// TODO(esad): push the chunk to the second closest peer, pass in my address to skip
 			pr, err := ps.peerSuggester.ClosestPeer(chunk.Address())
 			if err != nil {
 				return fmt.Errorf("second closest peer: %w", err)

@@ -117,7 +117,7 @@ func (d *mock) ClosestPeer(address swarm.Address, skipPeers ...swarm.Address) (p
 			continue
 		}
 
-		if closer, _ := swarm.DistanceCmp(address.Bytes(), p.Bytes(), peerAddr.Bytes()); closer > 0 {
+		if dcmp, _ := swarm.DistanceCmp(address.Bytes(), p.Bytes(), peerAddr.Bytes()); dcmp == 1 {
 			peerAddr = p
 		}
 	}
